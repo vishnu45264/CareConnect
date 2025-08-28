@@ -92,7 +92,7 @@ const isSenior = (req, res, next) => {
   next();
 };
 
-// Middleware to check if user is volunteer
+// Middleware to check if user is volunteer (case-insensitive)
 const isVolunteer = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({
@@ -101,7 +101,8 @@ const isVolunteer = (req, res, next) => {
     });
   }
 
-  if (req.user.role !== 'volunteer') {
+  const role = String(req.user.role || '').toLowerCase();
+  if (role !== 'volunteer') {
     return res.status(403).json({
       error: 'Access denied',
       message: 'This resource is only available for volunteers'

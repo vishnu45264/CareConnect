@@ -12,6 +12,8 @@ const requestRoutes = require('./routes/requests');
 const healthRoutes = require('./routes/health');
 const emergencyRoutes = require('./routes/emergency');
 const communityRoutes = require('./routes/community');
+const notificationRoutes = require('./routes/notifications');
+const messageRoutes = require('./routes/messages');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -27,15 +29,40 @@ app.use(cors({
   credentials: true
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+// Rate limiting - More lenient for development
+const createRateLimiter = (windowMs, maxRequests) => rateLimit({
+  windowMs,
+  max: maxRequests,
   message: {
-    error: 'Too many requests from this IP, please try again later.'
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: Math.ceil(windowMs / 1000 / 60) // minutes
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many requests from this IP, please try again later.',
+      retryAfter: Math.ceil(windowMs / 1000 / 60),
+      message: `Rate limit exceeded. Try again in ${Math.ceil(windowMs / 1000 / 60)} minutes.`
+    });
   }
 });
-app.use('/api/', limiter);
+
+// Different rate limits for different environments
+const isDevelopment = process.env.NODE_ENV === 'development';
+const disableRateLimit = process.env.DISABLE_RATE_LIMIT === 'true';
+const rateLimitWindow = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000; // 15 minutes
+const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || (isDevelopment ? 1000 : 100);
+
+if (disableRateLimit && isDevelopment) {
+  console.log('⚠️  Rate limiting disabled for development');
+} else {
+  const limiter = createRateLimiter(rateLimitWindow, rateLimitMax);
+  // Apply rate limiting to API routes
+  app.use('/api/', limiter);
+  // Log rate limiting configuration
+  console.log(`Rate limiting: ${rateLimitMax} requests per ${Math.ceil(rateLimitWindow / 1000 / 60)} minutes (${isDevelopment ? 'development' : 'production'} mode)`);
+}
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -61,6 +88,8 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/api/emergency', emergencyRoutes);
 app.use('/api/community', communityRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/messages', messageRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

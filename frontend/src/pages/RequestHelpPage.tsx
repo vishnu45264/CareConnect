@@ -123,12 +123,64 @@ const RequestHelpPage: React.FC = () => {
   const onSubmit = async (data: RequestFormData) => {
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please login to submit a request');
+        navigate('/login');
+        return;
+      }
+
+      // Transform form data to match backend schema
+      const requestData = {
+        category: data.category,
+        title: data.title,
+        description: data.description,
+        urgency: data.urgency,
+        schedule: {
+          preferredDate: data.preferredDate,
+          preferredTime: data.preferredTime,
+          duration: data.duration
+        },
+        location: {
+          address: data.location,
+          coordinates: [0, 0] // Default coordinates, can be enhanced with geocoding
+        },
+        budget: data.budget || null,
+        specialRequirements: data.specialRequirements || null
+      };
+
+      console.log('Submitting request data:', requestData);
+
+      const response = await fetch('http://localhost:5000/api/requests', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(requestData)
+      });
+
+      const result = await response.json();
+      console.log('Request submission response:', result);
+
+      if (!response.ok) {
+        if (result.details && Array.isArray(result.details)) {
+          // Handle validation errors from backend
+          const errorMessages = result.details.map((detail: any) => `${detail.field}: ${detail.message}`).join(', ');
+          throw new Error(errorMessages);
+        }
+        throw new Error(result.message || result.error || 'Failed to submit request');
+      }
+
       toast.success('Your request has been submitted successfully! We\'ll match you with a volunteer soon.');
-      navigate('/senior/dashboard');
-    }, 2000);
+      navigate('/senior-dashboard');
+    } catch (error: any) {
+      console.error('Request submission error:', error);
+      toast.error(error.message || 'Failed to submit request. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -258,8 +310,20 @@ const RequestHelpPage: React.FC = () => {
                     <input
                       id="preferredDate"
                       type="date"
-                      {...register('preferredDate', { required: 'Date is required' })}
+                      {...register('preferredDate', { 
+                        required: 'Date is required',
+                        validate: (value) => {
+                          const selectedDate = new Date(value);
+                          const today = new Date();
+                          today.setHours(0, 0, 0, 0);
+                          if (selectedDate < today) {
+                            return 'Preferred date cannot be in the past';
+                          }
+                          return true;
+                        }
+                      })}
                       className="input-field"
+                      min={new Date().toISOString().split('T')[0]}
                     />
                     {errors.preferredDate && (
                       <p className="mt-1 text-sm text-danger-600">{errors.preferredDate.message}</p>

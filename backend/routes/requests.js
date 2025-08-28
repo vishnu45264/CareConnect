@@ -1,6 +1,7 @@
 const express = require('express');
 const Request = require('../models/Request');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const { protect, isSenior, isVolunteer } = require('../middleware/auth');
 const { validateRequestCreation, validateRequestUpdate, validatePagination, validateSearch } = require('../middleware/validation');
 
@@ -83,10 +84,16 @@ router.get('/', protect, validatePagination, validateSearch, async (req, res) =>
     if (req.user.role === 'senior') {
       query.senior = req.user._id;
     } else if (req.user.role === 'volunteer') {
-      query.status = 'pending';
-      // Filter by volunteer preferences
-      if (req.user.preferences?.preferredCategories?.length > 0) {
-        query.category = { $in: req.user.preferences.preferredCategories };
+      // If volunteer parameter is provided, get requests assigned to this volunteer
+      if (req.query.volunteer) {
+        query.volunteer = req.query.volunteer;
+      } else {
+        // Otherwise, get pending requests available for volunteers
+        query.status = 'pending';
+        // Filter by volunteer preferences
+        if (req.user.preferences?.preferredCategories?.length > 0) {
+          query.category = { $in: req.user.preferences.preferredCategories };
+        }
       }
     }
 
@@ -313,6 +320,17 @@ router.post('/:id/accept', protect, isVolunteer, async (req, res) => {
     request.volunteer = req.user._id;
     await request.updateStatus('accepted');
 
+    // Create notification for the senior
+    await Notification.createNotification({
+      user: request.senior,
+      type: 'request_accepted',
+      title: 'Request Accepted!',
+      message: `${req.user.name} has accepted your request "${request.title}". They will contact you soon.`,
+      relatedRequest: request._id,
+      relatedUser: req.user._id,
+      priority: 'high'
+    });
+
     // Populate user info
     await request.populate('senior', 'name age rating location');
     await request.populate('volunteer', 'name rating');
@@ -349,17 +367,18 @@ router.post('/:id/complete', protect, async (req, res) => {
 
     // Check if user can complete this request
     if (req.user.role !== 'admin' && 
+        request.senior.toString() !== req.user._id.toString() &&
         request.volunteer?.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         error: 'Access denied',
-        message: 'Only the assigned volunteer can complete this request'
+        message: 'Only the senior who created the request or the assigned volunteer can complete this request'
       });
     }
 
-    if (request.status !== 'in-progress') {
+    if (request.status !== 'accepted' && request.status !== 'in-progress') {
       return res.status(400).json({
         error: 'Invalid status',
-        message: 'Request must be in progress to be completed'
+        message: 'Request must be accepted or in progress to be completed'
       });
     }
 
@@ -371,7 +390,28 @@ router.post('/:id/complete', protect, async (req, res) => {
       await User.findByIdAndUpdate(request.volunteer, {
         $inc: { completedRequests: 1 }
       });
+
+      // Create notification for the volunteer
+      await Notification.createNotification({
+        user: request.volunteer,
+        type: 'request_completed',
+        title: 'Request Completed!',
+        message: `The request "${request.title}" has been marked as completed by the senior.`,
+        relatedRequest: request._id,
+        relatedUser: req.user._id,
+        priority: 'medium'
+      });
     }
+
+    // Create notification for the senior
+    await Notification.createNotification({
+      user: request.senior,
+      type: 'request_completed',
+      title: 'Request Completed!',
+      message: `Your request "${request.title}" has been marked as completed. Thank you for using CareConnect!`,
+      relatedRequest: request._id,
+      priority: 'medium'
+    });
 
     res.json({
       success: true,
