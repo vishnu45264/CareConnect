@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 require('dotenv').config();
 
 
@@ -90,6 +91,14 @@ app.use('/api/emergency', emergencyRoutes);
 app.use('/api/community', communityRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/messages', messageRoutes);
+app.use(express.static(path.join(__dirname, "../frontend/build")));
+
+// Serve frontend in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+  });
+}
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -144,4 +153,4 @@ const startServer = async () => {
 
 startServer();
 
-module.exports = app; 
+module.exports = app;
